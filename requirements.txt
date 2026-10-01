@@ -1,0 +1,10 @@
+aiogram>=3.31,<4
+motor>=3.7,<4
+aiohttp>=3.12,<4
+Pillow>=10.1,<13
+python-dotenv>=1,<2
+cryptography>=44
+recard[hoyolab]>=0.6.1
+genshin>=1.7
+cloudscraper>=1.2.71,<2
+enka>=2.5.20
