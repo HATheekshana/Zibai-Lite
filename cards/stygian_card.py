@@ -111,6 +111,9 @@ class StygianCardBuilder:
     def _collect_icon_urls(self):
         urls = set()
         for stage in self._stages():
+            for key in ("strongest_strike_icon", "highest_total_damage_icon"):
+                if stage.get(key):
+                    urls.add(stage[key])
             if stage.get("boss_icon"):
                 urls.add(stage["boss_icon"])
             for character in stage.get("team", []):
@@ -178,7 +181,7 @@ class StygianCardBuilder:
         icons_bottom = icons_top + icon_size
         level_y = icons_bottom + 16
         stat_y0 = icons_bottom + 52
-        stat_y1 = stat_y0 + 32
+        stat_y1 = stat_y0 + 44
         panel_bottom = stat_y1 + 26
         return {
             "title_y_start": 24, "time_row_y": time_row_y, "divider_y": divider_y,
@@ -237,6 +240,9 @@ class StygianCardBuilder:
 
         stat_y0 = box[1] + offsets["stat_y0"]
         stat_y1 = box[1] + offsets["stat_y1"]
+        for key, stat_y in (("strongest_strike_icon", stat_y0), ("highest_total_damage_icon", stat_y1)):
+            if stage.get(key):
+                self._square(canvas, draw, (box[0] + 22, stat_y - 17), stage[key], 34, ACCENT_B)
         draw_text_with_shadow(draw, "Strongest Single Strike", (title_x, stat_y0), self.font_path, 14, text_color=MUTED, anchor="lm")
         draw_text_with_shadow(draw, f"{stage.get('strongest_strike', 0):,}", (box[2] - 28, stat_y0), self.font_path, 18,
                                text_color=WHITE, anchor="rm")

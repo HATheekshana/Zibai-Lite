@@ -62,10 +62,25 @@ def _best_character_value(challenge, best_type):
     return 0
 
 
+def _best_character_icon(challenge, best_type):
+    for best in challenge.best_characters:
+        if best.type == best_type:
+            icon = getattr(best, "side_icon", "")
+            if icon:
+                return icon
+            # Older responses may only include the ID; use its team portrait.
+            for character in challenge.team:
+                if character.id == best.id:
+                    return character.icon
+    return ""
+
+
 def _challenge_dict(challenge, show_teams=True):
     import genshin  # local import: only needed for the BestCharacterType enum
 
     return {
+        "strongest_strike_icon": _best_character_icon(challenge, genshin.models.HardChallengeBestCharacterType.STRIKE),
+        "highest_total_damage_icon": _best_character_icon(challenge, genshin.models.HardChallengeBestCharacterType.DAMAGE),
         "boss_name": challenge.name,
         "time_elapsed": challenge.time_used or 0,
         "team": [_character_dict(c) for c in challenge.team[:4]] if show_teams else [],
