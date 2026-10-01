@@ -83,6 +83,8 @@ async def _load_icon(session, url):
 
 
 def _format_time(seconds):
+    if seconds is None:
+        return "Not shared"
     seconds = int(seconds or 0)
     if seconds >= 60:
         return f"{seconds // 60}m {seconds % 60:02d}s"

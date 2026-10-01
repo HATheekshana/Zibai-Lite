@@ -62,13 +62,13 @@ def _best_character_value(challenge, best_type):
     return 0
 
 
-def _challenge_dict(challenge):
+def _challenge_dict(challenge, show_teams=True):
     import genshin  # local import: only needed for the BestCharacterType enum
 
     return {
         "boss_name": challenge.name,
         "time_elapsed": challenge.time_used or 0,
-        "team": [_character_dict(c) for c in challenge.team[:4]],
+        "team": [_character_dict(c) for c in challenge.team[:4]] if show_teams else [],
         "boss_icon": challenge.enemy.icon if challenge.enemy else "",
         "boss_level": challenge.enemy.level if challenge.enemy else 90,
         "strongest_strike": _best_character_value(
@@ -80,7 +80,7 @@ def _challenge_dict(challenge):
     }
 
 
-def normalize_stygian(uid, stygian_list):
+def normalize_stygian(uid, stygian_list, show_teams=True):
     """Flattens the list[HardChallenge] genshin.py returns into the plain
     dict shape stygian_card.py renders. Returns None if there's no Stygian
     Onslaught data for this cycle yet (no seasons, or no single-player runs
@@ -95,7 +95,7 @@ def normalize_stygian(uid, stygian_list):
     current = max(stygian_list, key=lambda item: item.season.start_at)
 
     single = current.single_player
-    if not single or not single.has_data or not single.challenges:
+    if not single or not single.has_data:
         return None
 
     best_record = single.best_record
@@ -107,5 +107,5 @@ def normalize_stygian(uid, stygian_list):
         "mode": "Single-Player Mode",
         "difficulty_label": _roman(best_record.difficulty) if best_record else "",
         "best_record_seconds": best_record.time_used if best_record else 0,
-        "stages": [_challenge_dict(c) for c in single.challenges],
+        "stages": [_challenge_dict(c, show_teams=show_teams) for c in single.challenges],
     }

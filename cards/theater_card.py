@@ -82,7 +82,8 @@ class TheaterCardBuilder:
     instead of reproducing screenshot-only text.
     """
 
-    def __init__(self, uid, theater, font_path=FONT_PATH):
+    def __init__(self, uid, theater, font_path=FONT_PATH, show_teams=True):
+        self.show_teams = show_teams
         self.uid = uid
         if hasattr(theater, "datas") and theater.datas:
             self.theater = theater.datas[0]
@@ -113,13 +114,15 @@ class TheaterCardBuilder:
     def _collect_icon_urls(self):
         urls = set()
         stats = self.theater.battle_stats
+        if stats is None:
+            return set()
         for entry in (stats.max_defeat_character, stats.max_damage_character, stats.max_take_damage_character):
             if entry:
                 urls.add(entry.icon)
-        for entry in stats.fastest_character_list:
+        for entry in (stats.fastest_character_list if self.show_teams else []):
             urls.add(entry.icon)
         for act in self._acts_to_render():
-            for character in act.characters:
+            for character in (act.characters if self.show_teams else []):
                 urls.add(character.icon)
         return urls
 
@@ -160,9 +163,9 @@ class TheaterCardBuilder:
             period = ""
         hero_subtitle(draw, cx, box[1] + 130, period, self.font_path, ACCENT_B, size=15)
 
-        difficulty_label = DIFFICULTY_LABELS.get(int(stats.difficulty), "Unknown")
+        difficulty_label = DIFFICULTY_LABELS.get(int(stats.difficulty), "Unknown") if stats.difficulty is not None else "Not shared"
         entries = [
-            ("Difficulty", str(int(stats.difficulty)), ACCENT_A),
+            ("Difficulty", str(int(stats.difficulty)) if stats.difficulty is not None else "Not shared", ACCENT_A),
             ("Mode", difficulty_label, WHITE),
             ("Best Record", f"Act {stats.best_record}", ACCENT_B),
         ]
@@ -248,12 +251,12 @@ class TheaterCardBuilder:
         strip_h = 92
         box = (MARGIN, y, CARD_WIDTH - MARGIN, y + strip_h)
         panel(draw, box)
-        draw_text_with_shadow(draw, "FASTEST TEAM", (MARGIN + 22, y + 22), self.font_path, 13, text_color=MUTED, anchor="lm")
+        draw_text_with_shadow(draw, "FASTEST TEAM" if self.show_teams else "FASTEST CLEAR", (MARGIN + 22, y + 22), self.font_path, 13, text_color=MUTED, anchor="lm")
 
         icon_size = 42
         icon_x = MARGIN + 22
         icon_y = y + strip_h - icon_size - 16
-        for character in list(stats.fastest_character_list)[:4]:
+        for character in (list(stats.fastest_character_list)[:4] if self.show_teams else []):
             color = ACCENT_A if character.rarity >= 5 else (170, 174, 188, 255)
             self._square(canvas, draw, (icon_x, icon_y), character.icon, icon_size, color)
             icon_x += icon_size + 12
@@ -279,7 +282,7 @@ class TheaterCardBuilder:
         draw_text_with_shadow(draw, f"{act.finish_datetime:%Y.%m.%d}", (x0 + 18, y0 + 52), self.font_path, 12,
                                text_color=MUTED, anchor="lm")
 
-        characters = list(act.characters)[:6]
+        characters = list(act.characters)[:6] if self.show_teams else []
         icon_size = 68
         spacing = 10
         total_width = len(characters) * icon_size + max(0, len(characters) - 1) * spacing
@@ -320,7 +323,7 @@ class TheaterCardBuilder:
 
         header_h = 236
         overview_h = 46 + 2 * (104 + GAP) - GAP
-        honours_h = 46 + (104 + GAP) + 92
+        honours_h = (46 + (104 + GAP) + 92) if self.theater.battle_stats is not None else 0
         act_rows = -(-len(acts) // 2)
         acts_h = 46 + act_rows * (148 + GAP) - GAP
         footer_h = 44
@@ -337,7 +340,8 @@ class TheaterCardBuilder:
             y = MARGIN
             y = self._draw_header(canvas, draw, y) + GAP
             y = self._draw_overview(canvas, draw, y) + GAP
-            y = self._draw_battle_honours(canvas, draw, y) + GAP
+            if self.theater.battle_stats is not None:
+                y = self._draw_battle_honours(canvas, draw, y) + GAP
             y = self._draw_acts_grid(canvas, draw, acts, y) + GAP
 
             footer(draw, CARD_WIDTH, y, "IMAGINARIUM // THEATER", "THE STAGE IS SET.", f"UID {self.uid}", self.font_path)
@@ -350,5 +354,5 @@ class TheaterCardBuilder:
         return buffer
 
 
-async def generate_theater_card(uid, theater):
-    return await TheaterCardBuilder(uid, theater).build()
+async def generate_theater_card(uid, theater, show_teams=True):
+    return await TheaterCardBuilder(uid, theater, show_teams=show_teams).build()

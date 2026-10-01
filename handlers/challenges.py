@@ -46,17 +46,26 @@ async def _personal_report(owner,command,previous=False):
     return buffer,title
 
 async def _public_report(uid,command,previous=False,reason=""):
-    if command in ("abyss","abyssinfo"):
-        from services.public_abyss import public_abyss
-        try:
-            data=await public_abyss(uid,previous)
-            if data is not None:
-                async with report_slots:
+    from services.public_abyss import public_challenge
+    try:
+        data=await public_challenge(uid,command,previous)
+        if data is not None:
+            async with report_slots:
+                if command in ("abyss","abyssinfo"):
                     return await generate_abyss_card(uid,data,show_teams=False), "Spiral Abyss · Public Battle Chronicle"
-        except genshin.errors.DataNotPublic:
-            raise ValueError("This UID's Battle Chronicle is private. Enable public Battle Chronicle visibility in HoYoLAB.") from None
-        except Exception as error:
-            logging.warning("Operator public Abyss lookup failed: %s",type(error).__name__)
+                if command == "stygian":
+                    data=normalize_stygian(uid,data,show_teams=False)
+                    if data is not None:
+                        return await generate_stygian_card(data), "Stygian Onslaught · Public Battle Chronicle"
+                else:
+                    if hasattr(data,"datas"):
+                        data=data.datas[0] if data.datas else None
+                    if data is not None:
+                        return await generate_theater_card(uid,data,show_teams=False), "Imaginarium Theater · Public Battle Chronicle"
+    except genshin.errors.DataNotPublic:
+        raise ValueError("This UID's Battle Chronicle is private. Enable public Battle Chronicle visibility in HoYoLAB.") from None
+    except Exception as error:
+        logging.warning("Operator public %s lookup failed: %s",command,type(error).__name__)
     if previous:
         raise ValueError("Previous-period records require a valid /cookie_login. UID-only profiles do not provide battle history.")
     profile=await get_profile(uid)
@@ -64,7 +73,8 @@ async def _public_report(uid,command,previous=False,reason=""):
         if command in ("abyss","abyssinfo"):
             from cards.abyss_card import generate_public_abyss_card
             return await asyncio.to_thread(generate_public_abyss_card,profile)
-        return await asyncio.to_thread(public_summary_card,profile,command,reason)
+        from cards.public_endgame import public_endgame_card
+        return await asyncio.to_thread(public_endgame_card,profile,command)
 
 async def build_report(owner,command,previous=False):
     user=await user_record(owner)
