@@ -63,6 +63,8 @@ async def character_card(owner, character_id, uid=None, public=False, source_ove
             result=await client.card(int(uid) if uid else uid_for(user),int(character_id),
                 source=source,style=style,custom_image=custom_art(user,character_id,owner))
             if not result.cards: raise ValueError("Character unavailable from the selected source.")
+            from services.statistics import card_created
+            await card_created()
             return result.cards[0]
 
 

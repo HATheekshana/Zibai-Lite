@@ -12,17 +12,19 @@ from handlers.login import router4
 from handlers.settings import router_settings
 from handlers.guest import router_guest
 from handlers.upcard import router_upcard
+from handlers.statistics import router_statistics, StatisticsMiddleware
 from services.guards import RequestGuard
 from services.responses import ReplyContext, reply_requests
 
 def create_dispatcher():
     dp = Dispatcher()
+    dp.update.outer_middleware(StatisticsMiddleware())
     dp.message.outer_middleware(ReplyContext())
     dp.callback_query.outer_middleware(ReplyContext())
     guard = RequestGuard()
     dp.message.outer_middleware(guard)
     dp.callback_query.outer_middleware(guard)
-    dp.include_routers(router_upcard, router_help, router_challenges, router2, router4, cookie, router_settings, router_guest)
+    dp.include_routers(router_statistics, router_upcard, router_help, router_challenges, router2, router4, cookie, router_settings, router_guest)
     return dp
 
 async def main():

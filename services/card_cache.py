@@ -79,6 +79,8 @@ async def media(card):
                     splash_directory=classic.splash_directory,font_path=classic.font_path,
                     player_data_provider=classic.player_data_provider)
                 card.buffer=await generator.generate_card(card.uid,card.cid,profile=card.profile,custom_image=card.art)
+                from services.statistics import card_created
+                await card_created()
     return types.BufferedInputFile(card.buffer.getvalue(),filename=f'{card.cid}.jpg')
 
 async def remember(card, file_id):

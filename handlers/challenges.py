@@ -76,7 +76,7 @@ async def _public_report(uid,command,previous=False,reason=""):
         from cards.public_endgame import public_endgame_card
         return await asyncio.to_thread(public_endgame_card,profile,command)
 
-async def build_report(owner,command,previous=False):
+async def _build_report(owner,command,previous=False):
     user=await user_record(owner)
     uid=uid_for(user)
     saved=user.get("hoyolab_data")
@@ -96,6 +96,12 @@ async def build_report(owner,command,previous=False):
     except ValueError:
         reason="Detailed records unavailable. Showing your public profile."
     return await _public_report(uid,command,previous,reason)
+
+async def build_report(owner,command,previous=False):
+    result = await _build_report(owner,command,previous)
+    from services.statistics import card_created
+    await card_created()
+    return result
 
 @router_challenges.message(Command("abyss","abyssinfo","stygian","theater","theatre"))
 async def report(message:types.Message):
