@@ -14,6 +14,7 @@ from services.recard_service import STYLES, roster, user_record
 router_settings = Router()
 MAX_BYTES = 10 * 1024 * 1024
 MAX_PIXELS = 25_000_000
+IMAGE_PAGE_SIZE = 16
 STYLE_LABELS = {"1": "Classic", "2": "Namecard", "3": "Textured"}
 
 class ImageUpload(StatesGroup):
@@ -73,6 +74,37 @@ async def prompt_upload(message, state, character):
     await state.set_data({"character_id": int(character.id)})
     await message.answer(f"Send an image for {character.name} (up to 10 MB), or /cancel.")
 
+def image_menu(chars, owner, page=0):
+    pages = max(1, (len(chars) + IMAGE_PAGE_SIZE - 1) // IMAGE_PAGE_SIZE)
+    page = max(0, min(page, pages - 1))
+    kb = InlineKeyboardBuilder()
+    for character in chars[page * IMAGE_PAGE_SIZE:(page + 1) * IMAGE_PAGE_SIZE]:
+        kb.button(text=character.name, callback_data=f"setimage:{owner}:{character.id}")
+    kb.adjust(4)
+    navigation = []
+    if page:
+        navigation.append(types.InlineKeyboardButton(text="‹ Previous", callback_data=f"imagepage:{owner}:{page-1}"))
+    if page + 1 < pages:
+        navigation.append(types.InlineKeyboardButton(text="Next ›", callback_data=f"imagepage:{owner}:{page+1}"))
+    if navigation:
+        kb.row(*navigation)
+    return f"Choose a character for custom artwork · Page {page+1}/{pages}", kb.as_markup()
+
+
+@router_settings.callback_query(F.data.startswith("imagepage:"))
+async def image_page(callback: types.CallbackQuery):
+    _, owner, page = callback.data.split(":")
+    if str(callback.from_user.id) != owner or callback.message.chat.type != "private":
+        return await callback.answer("Use your own /setimage menu in private chat.", show_alert=True)
+    chars = await roster(owner)
+    if not chars:
+        return await callback.answer("No characters available. Open /setimage again.", show_alert=True)
+    text, keyboard = image_menu(chars, owner, int(page))
+    await callback.answer()
+    if callback.message.text != text or callback.message.reply_markup != keyboard:
+        await callback.message.edit_text(text, reply_markup=keyboard)
+
+
 @router_settings.message(Command("setimage"))
 async def setimage(message: types.Message, command: CommandObject, state: FSMContext):
     if message.chat.type != "private":
@@ -85,14 +117,15 @@ async def setimage(message: types.Message, command: CommandObject, state: FSMCon
         matches = [c for c in chars if str(c.id) == query or c.name.casefold() == query.casefold()]
         if len(matches) != 1:
             return await message.answer("Use /setimage with an exact character name or ID, or /setimage to choose.")
+        source = message.reply_to_message
+        if source and (source.photo or source.document):
+            await state.set_state(ImageUpload.waiting)
+            await state.set_data({"character_id": int(matches[0].id)})
+            return await upload(message, state, source=source)
         return await prompt_upload(message, state, matches[0])
     await state.clear()
-    for start in range(0, len(chars), 60):
-        kb = InlineKeyboardBuilder()
-        for c in chars[start:start + 60]:
-            kb.button(text=c.name, callback_data=f"setimage:{message.from_user.id}:{c.id}")
-        kb.adjust(3)
-        await message.answer("Choose a character for custom artwork:", reply_markup=kb.as_markup())
+    text, keyboard = image_menu(chars, message.from_user.id)
+    await message.answer(text, reply_markup=keyboard)
 
 @router_settings.callback_query(F.data.startswith("setimage:"))
 async def image_character(callback: types.CallbackQuery, state: FSMContext):
@@ -135,9 +168,10 @@ def save_image(payload, owner, cid):
     return path.relative_to(BASE_DIR).as_posix()
 
 @router_settings.message(ImageUpload.waiting, F.chat.type == "private", F.photo | F.document)
-async def upload(message: types.Message, state: FSMContext):
-    file = message.photo[-1] if message.photo else message.document
-    if message.document and not (file.mime_type or "").startswith("image/"):
+async def upload(message: types.Message, state: FSMContext, source=None):
+    source = source or message
+    file = source.photo[-1] if source.photo else source.document
+    if source.document and not (file.mime_type or "").startswith("image/"):
         return await message.answer("Please send an image or /cancel.")
     if (file.file_size or 0) > MAX_BYTES:
         return await message.answer("Image exceeds 10 MB.")

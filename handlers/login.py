@@ -313,18 +313,19 @@ async def login_uid(message: types.Message):
 @router4.message(Command("logout"))
 async def logout_uid(message: types.Message):
     user_id = str(message.from_user.id)
-
-    user = await users_col.find_one({"user_id": user_id})
-
-    if not user or not user.get("genshin_uid"):
-        return await message.answer("Not logged in.")
-
-    await users_col.update_one(
+    result = await users_col.update_one(
         {"user_id": user_id},
-        {"$set": {"genshin_uid": None}}
+        {"$set": {"genshin_uid": None, "hoyolab_login_required": True},
+         "$unset": {"hoyolab_data": ""}}
     )
+    user_inputs.pop(message.from_user.id, None)
+    for key, owner in list(menu_owners.items()):
+        if owner == message.from_user.id:
+            menu_owners.pop(key, None)
+    if not result.matched_count:
+        return await message.answer("Not logged in.")
+    await message.answer("Logged out. Active UID cleared and saved HoYoLAB cookies removed.")
 
-    await message.answer("Logged out successfully.", parse_mode="HTML")
 @router4.message(Command("muid"))
 async def my_uid(message: types.Message):
     user_id = str(message.from_user.id)
