@@ -1,7 +1,7 @@
 from services.card_cache import deliver
 from html import escape
 from aiogram import Router, types, F
-from aiogram.filters import Command
+from aiogram.filters import Command, CommandObject
 from aiogram.types import BufferedInputFile
 from services.responses import waiting, finish_photo, pending
 from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -37,8 +37,29 @@ async def change_character_page(callback: types.CallbackQuery):
     await callback.message.edit_text(text, reply_markup=markup)
 
 @router2.message(Command("myc"))
-async def cmd_characters(message:types.Message):
-    await character_menu(message,message.from_user.id)
+async def cmd_characters(message:types.Message, command:CommandObject):
+    query=(command.args or "").strip()
+    if not query:
+        return await character_menu(message,message.from_user.id)
+    from services.character_match import character_matches
+    owner=message.from_user.id
+    user=await user_record(owner)
+    uid=uid_for(user)
+    source="hoyolab" if user.get("hoyolab_data") else "enka"
+    chars=await menu_roster(owner,uid,source)
+    matches=character_matches(chars,query)
+    if not matches:
+        return await message.answer("No matching character available. Try /myc to see your characters.")
+    if len(matches)>1:
+        kb=InlineKeyboardBuilder()
+        for c in matches:
+            kb.button(text=c.name,callback_data=f"{'rh' if source=='hoyolab' else 'rc'}:{owner}:{uid}:{c.id}")
+        kb.adjust(3)
+        return await message.answer("Which character did you mean?",reply_markup=kb.as_markup())
+    status=await message.answer(waiting("Generating card…"))
+    pending.set(status)
+    card,caption=await ranked_character_card(owner,matches[0].id,uid,source_override=source,bot_id=message.bot.id)
+    await deliver(card,caption,message.bot,status=status)
 
 @router2.callback_query(F.data.startswith("rc:") | F.data.startswith("rh:"))
 async def render_character(callback:types.CallbackQuery):

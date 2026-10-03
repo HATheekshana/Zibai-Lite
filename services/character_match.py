@@ -7,16 +7,22 @@ def normalize(value):
     value=unicodedata.normalize('NFKD',str(value)).casefold()
     return ' '.join(re.findall(r'[a-z0-9]+',value))
 
-def match_character(characters,query):
+def character_matches(characters,query):
+    characters=list(characters)
     query=normalize(query)
-    if len(query.replace(' ',''))<2:
-        raise ValueError('Enter at least two letters of the character name.')
+    exact=[c for c in characters if str(c.id)==query or normalize(c.name)==query]
+    if exact:return exact
+    if len(query.replace(' ',''))<2:raise ValueError('Enter at least two letters or a character ID.')
     pairs=[(c,normalize(c.name)) for c in characters]
-    exact=[c for c,n in pairs if n==query]
-    if len(exact)==1:return exact[0]
     partial=[c for c,n in pairs if query in n or query.replace(' ','') in n.replace(' ','')]
-    if len(partial)==1:return partial[0]
-    if partial:raise ValueError('Several characters match: '+', '.join(c.name for c in partial)+'. Type more of the name.')
+    if partial:return partial
+    if len(query.replace(' ',''))<3:return []
     scored=sorted([(max(SequenceMatcher(None,query,part).ratio() for part in [n]+n.split()),c) for c,n in pairs],key=lambda p:p[0],reverse=True)
-    if scored and scored[0][0]>=0.65 and (len(scored)==1 or scored[0][0]-scored[1][0]>=0.10):return scored[0][1]
-    raise ValueError('No clear match. '+('Try: '+', '.join(c.name for score,c in scored[:4]) if scored else 'No characters available.'))
+    if not scored or scored[0][0]<0.65:return []
+    return [c for score,c in scored if score>=0.65 and scored[0][0]-score<0.10]
+
+def match_character(characters,query):
+    matches=character_matches(characters,query)
+    if len(matches)==1:return matches[0]
+    if matches:raise ValueError('Several characters match: '+', '.join(c.name for c in matches)+'. Type more of the name.')
+    raise ValueError('No matching character found. Try another part of the name.')

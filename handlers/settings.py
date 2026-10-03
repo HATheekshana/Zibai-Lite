@@ -92,11 +92,16 @@ def image_menu(chars, owner, page=0):
 
 
 @router_settings.callback_query(F.data.startswith("imagepage:"))
-async def image_page(callback: types.CallbackQuery):
+async def image_page(callback: types.CallbackQuery, state: FSMContext):
     _, owner, page = callback.data.split(":")
     if str(callback.from_user.id) != owner or callback.message.chat.type != "private":
         return await callback.answer("Use your own /setimage menu in private chat.", show_alert=True)
     chars = await roster(owner)
+    selection = await state.get_data()
+    if selection.get("choice_message") == callback.message.message_id:
+        ids = selection.get("choice_ids")
+        if ids is not None:
+            chars = [c for c in chars if int(c.id) in ids]
     if not chars:
         return await callback.answer("No characters available. Open /setimage again.", show_alert=True)
     text, keyboard = image_menu(chars, owner, int(page))
@@ -114,9 +119,19 @@ async def setimage(message: types.Message, command: CommandObject, state: FSMCon
         return await message.answer("No characters available. Check your login and showcase.")
     query = (command.args or "").strip()
     if query:
-        matches = [c for c in chars if str(c.id) == query or c.name.casefold() == query.casefold()]
-        if len(matches) != 1:
-            return await message.answer("Use /setimage with an exact character name or ID, or /setimage to choose.")
+        from services.character_match import character_matches
+        matches = character_matches(chars, query)
+        if not matches:
+            return await message.answer("No matching character available. Use /setimage to choose.")
+        if len(matches) > 1:
+            await state.clear()
+            text, keyboard = image_menu(matches, message.from_user.id)
+            sent = await message.answer("Several characters match. " + text, reply_markup=keyboard)
+            source = message.reply_to_message
+            await state.set_data({"choice_message": sent.message_id,
+                "choice_ids": [int(c.id) for c in matches],
+                "reply_image": source.model_dump(mode="json") if source and (source.photo or source.document) else None})
+            return
         source = message.reply_to_message
         if source and (source.photo or source.document):
             await state.set_state(ImageUpload.waiting)
@@ -137,6 +152,17 @@ async def image_character(callback: types.CallbackQuery, state: FSMContext):
     character = next((c for c in chars if str(c.id) == cid), None)
     if character is None:
         return await callback.message.answer("Character unavailable. Open /setimage again.")
+    selection = await state.get_data()
+    if selection.get("choice_message") == callback.message.message_id:
+        if int(cid) not in selection.get("choice_ids", []):
+            return await callback.message.answer("Open /setimage again.")
+        saved = selection.get("reply_image")
+        if saved:
+            await state.set_state(ImageUpload.waiting)
+            await state.set_data({"character_id": int(cid)})
+            await callback.message.edit_reply_markup(reply_markup=None)
+            return await upload(callback.message, state, source=types.Message.model_validate(saved), owner=int(owner))
+    await callback.message.edit_reply_markup(reply_markup=None)
     await prompt_upload(callback.message, state, character)
 
 @router_settings.message(Command("cancel"))
@@ -168,7 +194,8 @@ def save_image(payload, owner, cid):
     return path.relative_to(BASE_DIR).as_posix()
 
 @router_settings.message(ImageUpload.waiting, F.chat.type == "private", F.photo | F.document)
-async def upload(message: types.Message, state: FSMContext, source=None):
+async def upload(message: types.Message, state: FSMContext, source=None, owner=None):
+    owner = owner if owner is not None else message.from_user.id
     source = source or message
     file = source.photo[-1] if source.photo else source.document
     if source.document and not (file.mime_type or "").startswith("image/"):
@@ -182,10 +209,10 @@ async def upload(message: types.Message, state: FSMContext, source=None):
     stream = BytesIO()
     await message.bot.download(file, destination=stream)
     try:
-        path = await asyncio.to_thread(save_image, stream.getvalue(), message.from_user.id, data["character_id"])
+        path = await asyncio.to_thread(save_image, stream.getvalue(), owner, data["character_id"])
     except ValueError as exc:
         return await message.answer(str(exc))
-    await users_col.update_one({"user_id": str(message.from_user.id)},
+    await users_col.update_one({"user_id": str(owner)},
         {"$set": {f"card_settings.splash_arts.{int(data['character_id'])}": path}}, upsert=True)
     await state.clear()
     await message.answer("Custom image saved. Generate a new card with /myc to see it.")
