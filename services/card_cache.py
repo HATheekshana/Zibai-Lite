@@ -16,6 +16,8 @@ from aiogram.exceptions import TelegramBadRequest
 
 _cache = db['cards_render_cache']
 _revision = None
+from weakref import WeakValueDictionary
+_delivery_locks = WeakValueDictionary()
 
 def snapshot(value):
     """Normalize Enka models and nested HoYoLAB records deterministically."""
@@ -93,6 +95,16 @@ def invalid_media(error):
     return any(part in text for part in ('wrong file identifier','file_id_invalid','file reference expired','invalid file id','wrong remote file identifier'))
 
 async def deliver(card,caption,bot,status=None,inline_id=None,cache_chat=None):
+    lock=_delivery_locks.setdefault(card.key,asyncio.Lock())
+    async with lock:
+        # Another request may have completed while this one was preparing data.
+        try:
+            saved=await _cache.find_one({'_id':card.key,'fingerprint':card.mark})
+            if saved:card.file_id=saved.get('file_id')
+        except Exception:pass
+        return await _deliver(card,caption,bot,status,inline_id,cache_chat)
+
+async def _deliver(card,caption,bot,status=None,inline_id=None,cache_chat=None):
     for attempt in range(2):
         try:
             photo=await media(card)

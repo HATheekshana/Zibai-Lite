@@ -61,10 +61,8 @@ async def character_page(owner, page=0, uid=None, source=None):
     return page_markup(chars, owner, uid, source, page, guest=True)
 
 async def publish_card(bot, inline_id, buffer, filename, title):
-    cached = await bot.send_photo(chat_id=INLINE_CACHE_CHAT_ID,
-        photo=types.BufferedInputFile(buffer.getvalue(), filename=filename), disable_notification=True)
-    await bot.edit_message_media(inline_message_id=inline_id,
-        media=types.InputMediaPhoto(media=cached.photo[-1].file_id, caption=title, parse_mode="HTML"), reply_markup=None)
+    from services.report_cache import deliver_report
+    await deliver_report(bot,buffer,title,inline_id=inline_id,cache_chat=INLINE_CACHE_CHAT_ID)
 
 async def show_failure(bot, inline_id, exc):
     logging.warning("Guest card request failed: %s", type(exc).__name__)
@@ -95,6 +93,15 @@ async def guest_message(message: types.Message):
         except Exception:
             logging.exception("Could not answer guest help query")
             return
+    user = await user_record(caller.id)
+    try:
+        uid_for(user)
+    except ValueError:
+        from handlers.help import LOGIN_TEXT, login_button
+        return await message.bot.answer_guest_query(guest_query_id=message.guest_query_id,
+            result=types.InlineQueryResultArticle(id="guest-login", title="Log in to Zibai",
+                input_message_content=types.InputTextMessageContent(message_text=LOGIN_TEXT),
+                reply_markup=login_button()))
     # Acknowledge before slow API/render work so the guest query does not expire.
     try:
         sent = await message.bot.answer_guest_query(guest_query_id=message.guest_query_id,
@@ -129,6 +136,13 @@ async def guest_selection(callback: types.CallbackQuery):
         return await callback.answer("Only the person who requested this menu can use it.", show_alert=True)
     if not callback.inline_message_id or flag not in {"h", "e"} or not uid.isdecimal() or not value.isdecimal():
         return await callback.answer("Open a new guest menu.")
+    try:
+        uid_for(await user_record(owner))
+    except ValueError:
+        from handlers.help import LOGIN_TEXT, login_button
+        await callback.answer("Please log in privately first.")
+        return await callback.bot.edit_message_text(inline_message_id=callback.inline_message_id,
+            text=LOGIN_TEXT,reply_markup=login_button())
     if not INLINE_CACHE_CHAT_ID:
         return await callback.answer("Guest image cache is not configured.", show_alert=True)
     source = "hoyolab" if flag == "h" else "enka"

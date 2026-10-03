@@ -7,7 +7,7 @@ from cryptography.fernet import Fernet
 from config import KEY, BASE_DIR
 from database.mongo import users_col
 
-render_slots = asyncio.Semaphore(2)
+from services.capacity import render_slots
 STYLES = {"1": "classic", "2": "chevron", "3": "textured"}
 
 def custom_art(user, character_id, owner):

@@ -18,6 +18,8 @@ from services.responses import ReplyContext, reply_requests
 
 def create_dispatcher():
     dp = Dispatcher()
+    from services.capacity import CapacityMiddleware
+    dp.update.outer_middleware(CapacityMiddleware())
     dp.update.outer_middleware(StatisticsMiddleware())
     dp.message.outer_middleware(ReplyContext())
     dp.callback_query.outer_middleware(ReplyContext())
@@ -37,6 +39,8 @@ async def main():
     bot.session.middleware(reply_requests)
     try:
         await users_col.create_index('user_id', unique=True)
+        from services.report_cache import _records
+        await _records.create_index('expires_at', expireAfterSeconds=0)
         await bot.set_my_commands([BotCommand(command=c, description=d) for c, d in COMMANDS])
         dispatcher = create_dispatcher()
         allowed_updates = dispatcher.resolve_used_update_types()

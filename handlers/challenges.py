@@ -15,7 +15,10 @@ from cards.abyss_card import generate_abyss_card
 from cards.theater_card import generate_theater_card
 from cards.stygian_card import generate_stygian_card
 router_challenges=Router()
-report_slots=asyncio.Semaphore(1)
+from services.report_cache import wrap, cached_render, scope, deliver_report
+generate_abyss_card=wrap("abyss",generate_abyss_card)
+generate_theater_card=wrap("theater",generate_theater_card)
+generate_stygian_card=wrap("stygian",generate_stygian_card)
 
 async def _personal_report(owner,command,previous=False):
     user=await user_record(owner)
@@ -23,26 +26,25 @@ async def _personal_report(owner,command,previous=False):
     client=await get_diary_client(owner)
     if client is None:
         raise ValueError("Use /cookie_login privately first.")
-    async with report_slots:
-        if command in ("abyss","abyssinfo"):
-            data=await client.get_spiral_abyss(uid,previous=previous)
-            if not data.floors: raise ValueError("No Abyss records for this period. Try /abyss previous.")
-            buffer=await generate_abyss_card(uid,data)
-            title="Spiral Abyss"
-        elif command=="stygian":
-            data=normalize_stygian(uid,await client.get_stygian_onslaught(uid))
-            if not data: raise ValueError("No single-player Stygian records for this period.")
-            buffer=await generate_stygian_card(data)
-            title="Stygian Onslaught"
-        else:
-            data=await client.get_imaginarium_theater(uid)
-            if hasattr(data,"datas"):
-                if not data.datas: raise ValueError("No Theater records for this period.")
-                data=data.datas[0]
-            if data is None or not getattr(data,"acts",[]):
-                raise ValueError("No completed Theater acts for this period.")
-            buffer=await generate_theater_card(uid,data)
-            title="Imaginarium Theater"
+    if command in ("abyss","abyssinfo"):
+        data=await client.get_spiral_abyss(uid,previous=previous)
+        if not data.floors: raise ValueError("No Abyss records for this period. Try /abyss previous.")
+        buffer=await generate_abyss_card(uid,data)
+        title="Spiral Abyss"
+    elif command=="stygian":
+        data=normalize_stygian(uid,await client.get_stygian_onslaught(uid))
+        if not data: raise ValueError("No single-player Stygian records for this period.")
+        buffer=await generate_stygian_card(data)
+        title="Stygian Onslaught"
+    else:
+        data=await client.get_imaginarium_theater(uid)
+        if hasattr(data,"datas"):
+            if not data.datas: raise ValueError("No Theater records for this period.")
+            data=data.datas[0]
+        if data is None or not getattr(data,"acts",[]):
+            raise ValueError("No completed Theater acts for this period.")
+        buffer=await generate_theater_card(uid,data)
+        title="Imaginarium Theater"
     return buffer,title
 
 async def _public_report(uid,command,previous=False,reason=""):
@@ -50,18 +52,17 @@ async def _public_report(uid,command,previous=False,reason=""):
     try:
         data=await public_challenge(uid,command,previous)
         if data is not None:
-            async with report_slots:
-                if command in ("abyss","abyssinfo"):
-                    return await generate_abyss_card(uid,data,show_teams=False), "Spiral Abyss · Public Battle Chronicle"
-                if command == "stygian":
-                    data=normalize_stygian(uid,data,show_teams=False)
-                    if data is not None:
-                        return await generate_stygian_card(data), "Stygian Onslaught · Public Battle Chronicle"
-                else:
-                    if hasattr(data,"datas"):
-                        data=data.datas[0] if data.datas else None
-                    if data is not None:
-                        return await generate_theater_card(uid,data,show_teams=False), "Imaginarium Theater · Public Battle Chronicle"
+            if command in ("abyss","abyssinfo"):
+                return await generate_abyss_card(uid,data,show_teams=False), "Spiral Abyss · Public Battle Chronicle"
+            if command == "stygian":
+                data=normalize_stygian(uid,data,show_teams=False)
+                if data is not None:
+                    return await generate_stygian_card(data), "Stygian Onslaught · Public Battle Chronicle"
+            else:
+                if hasattr(data,"datas"):
+                    data=data.datas[0] if data.datas else None
+                if data is not None:
+                    return await generate_theater_card(uid,data,show_teams=False), "Imaginarium Theater · Public Battle Chronicle"
     except genshin.errors.DataNotPublic:
         raise ValueError("This UID's Battle Chronicle is private. Enable public Battle Chronicle visibility in HoYoLAB.") from None
     except Exception as error:
@@ -69,12 +70,18 @@ async def _public_report(uid,command,previous=False,reason=""):
     if previous:
         raise ValueError("Previous-period records require a valid /cookie_login. UID-only profiles do not provide battle history.")
     profile=await get_profile(uid)
-    async with report_slots:
-        if command in ("abyss","abyssinfo"):
-            from cards.abyss_card import generate_public_abyss_card
-            return await asyncio.to_thread(generate_public_abyss_card,profile)
+    if command in ("abyss","abyssinfo"):
+        from cards.abyss_card import generate_public_abyss_card
+        renderer=lambda:generate_public_abyss_card(profile)
+        title="Spiral Abyss · Public profile"
+    else:
         from cards.public_endgame import public_endgame_card
-        return await asyncio.to_thread(public_endgame_card,profile,command)
+        renderer=lambda:public_endgame_card(profile,command)
+        title=("Stygian Onslaught" if command=="stygian" else "Imaginarium Theater")+" · Public profile"
+    async def factory():
+        result=await asyncio.to_thread(renderer)
+        return result[0]
+    return await cached_render("public-"+command,(profile,),{},factory),title
 
 async def _build_report(owner,command,previous=False):
     user=await user_record(owner)
@@ -98,10 +105,11 @@ async def _build_report(owner,command,previous=False):
     return await _public_report(uid,command,previous,reason)
 
 async def build_report(owner,command,previous=False):
-    result = await _build_report(owner,command,previous)
-    from services.statistics import card_created
-    await card_created()
-    return result
+    token=scope.set(str(owner))
+    try:
+        return await _build_report(owner,command,previous)
+    finally:
+        scope.reset(token)
 
 @router_challenges.message(Command("abyss","abyssinfo","stygian","theater","theatre"))
 async def report(message:types.Message):
@@ -114,7 +122,7 @@ async def report(message:types.Message):
     pending.set(status)
     try:
         buffer,title=await build_report(message.from_user.id,command,previous)
-        await finish_photo(status,types.BufferedInputFile(buffer.getvalue(),filename=buffer.name),caption=title)
+        await deliver_report(message.bot,buffer,title,status=status)
     except genshin.errors.DataNotPublic:
         await status.edit_text("These records are private. Enable Battle Chronicle visibility or log in with your own cookies.")
     except genshin.errors.InvalidCookies:
